@@ -15,16 +15,9 @@ import (
 	"github.com/leokuzmanovic/ai-bistro-chef/internal/services"
 )
 
-func doSomething(slice *[]int) {
-	*slice = append(*slice, 4)
-}
-
 func main() {
-	mySlice := []int{1, 2, 3}
-	doSomething(&mySlice)
-
 	defer func() {
-		err.HandlePanic(recover())
+		err.LogAndExit(recover())
 	}()
 	config := &configuration.AppConfig{}
 	di.Register(config)
@@ -44,7 +37,7 @@ func prepareAssistant() {
 
 	go func(assistantService services.AssistantService) {
 		defer func() {
-			err.HandlePanic(recover())
+			err.LogAndExit(recover())
 		}()
 		b := backoff.NewExponentialBackOff()
 		b.MaxElapsedTime = 10 * time.Second

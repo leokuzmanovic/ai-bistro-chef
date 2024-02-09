@@ -10,7 +10,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-func HandlePanic(e any) {
+func LogAndExit(e any) {
 	if e == nil {
 		return
 	}

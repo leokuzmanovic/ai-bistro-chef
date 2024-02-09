@@ -31,8 +31,7 @@ func (s *AssistantConfig) GetAssistantInstructions() *string {
 }
 
 func (s *AppConfig) GetOpenAiToken() string {
-	return "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"
-	// return "sk-9Z6Z6QZ6QZ6QZ6QZ6QZ6QZ6Q"
+	// return "sk-1122112211221122112211221122"
 }
 
 func (s *AppConfig) GetLocalRecipesPath() string {

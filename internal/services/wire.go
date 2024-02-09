@@ -8,6 +8,9 @@ import (
 func Wire() {
 	var appConfig *configuration.AppConfig = di.Get[*configuration.AppConfig]()
 
-	var assistantService AssistantService = NewAssistantServiceImpl(appConfig.GetOpenAiToken(), appConfig.GetLocalRecipesPath(), appConfig.GetAssistantConfig())
+	var assistantService AssistantService = NewAssistantServiceImpl(
+		appConfig.GetOpenAiToken(),
+		appConfig.GetLocalRecipesPath(),
+		appConfig.GetAssistantConfig())
 	di.Register(assistantService)
 }
