@@ -7,5 +7,5 @@ import (
 
 func WireControllers(e *echo.Echo) {
 	e.HTTPErrorHandler = er.GlobalErrorHandler
-	//wireBooks(e)
+	wireConversations(e)
 }

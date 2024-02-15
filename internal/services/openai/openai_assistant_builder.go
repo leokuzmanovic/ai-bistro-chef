@@ -5,23 +5,52 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/leokuzmanovic/ai-bistro-chef/internal/configuration"
+	errs "github.com/leokuzmanovic/ai-bistro-chef/internal/errors"
 	openai "github.com/sashabaranov/go-openai"
 )
 
-type AssistantInitializer interface {
+type openaiAssistantBuilder interface {
+	initAssistant() (*openai.Assistant, error)
 }
 
-func (s *AssistantServiceImpl) PrepareAssistant() error {
-	assistant, err := s.fetchAssistant()
-	if err != nil || assistant == nil {
-		return s.createNewAssistant()
-	} else {
-		fmt.Println("Assistant already exists!")
-		return s.updateAssistant(assistant)
+type openaiAssistantBuilderImpl struct {
+	client           *openai.Client
+	assistantConfig  *configuration.OpenAiAssistantConfig
+	localRecipesPath string
+}
+
+func newOpenaiAssistantBuilderImpl(client *openai.Client, localRecipesPath string, assistantConfig *configuration.OpenAiAssistantConfig) *openaiAssistantBuilderImpl {
+	return &openaiAssistantBuilderImpl{
+		client:           client,
+		assistantConfig:  assistantConfig,
+		localRecipesPath: localRecipesPath,
 	}
 }
 
-func (s *AssistantServiceImpl) fetchAssistant() (*openai.Assistant, error) {
+func (s *openaiAssistantBuilderImpl) initAssistant() (*openai.Assistant, error) {
+	assistant, err := s.loadAssistant()
+	if err != nil || assistant == nil {
+		return s.createNew()
+	} else {
+		fmt.Println("Assistant already exists")
+		err = s.updateAssistant(assistant)
+		if err != nil {
+			return assistant, err
+		}
+		return assistant, nil
+	}
+}
+
+func (s *openaiAssistantBuilderImpl) createNew() (*openai.Assistant, error) {
+	assistant, err := s.createNewAssistant()
+	if err != nil {
+		return assistant, err
+	}
+	return assistant, nil
+}
+
+func (s *openaiAssistantBuilderImpl) loadAssistant() (*openai.Assistant, error) {
 	limit := 20
 	order := "desc"
 	var before *string = nil
@@ -53,34 +82,36 @@ func (s *AssistantServiceImpl) fetchAssistant() (*openai.Assistant, error) {
 	}
 }
 
-func (s *AssistantServiceImpl) updateAssistant(assistant *openai.Assistant) error {
-	assistantFileIds := s.checkAssistentFiles(assistant.ID, assistant.FileIDs)
+func (s *openaiAssistantBuilderImpl) updateAssistant(assistant *openai.Assistant) error {
+	assistantFileIds, updated := s.checkAssistentFiles(assistant.ID, assistant.FileIDs)
 
-	fmt.Println("Updating assistant...")
-	_, err := s.client.ModifyAssistant(context.Background(), assistant.ID,
-		openai.AssistantRequest{
-			FileIDs: assistantFileIds,
-		})
+	if updated {
+		fmt.Println("Updating assistant...")
+		_, err := s.client.ModifyAssistant(context.Background(), assistant.ID,
+			openai.AssistantRequest{
+				FileIDs: assistantFileIds,
+			})
 
-	if err != nil {
-		fmt.Println("Error while updating assistant!")
-		return err
+		if err != nil {
+			fmt.Println("Error while updating assistant!")
+			return err
+		}
+		fmt.Println("Assistant updated!")
 	}
-	fmt.Println("Assistant updated!")
 	return nil
 }
 
-func (s *AssistantServiceImpl) createNewAssistant() error {
-	fmt.Println("Creating assistant...")
-	_, err := s.prepareNewAssistant()
+func (s *openaiAssistantBuilderImpl) createNewAssistant() (*openai.Assistant, error) {
+	fmt.Println("Creating assistant")
+	assistant, err := s.prepareNewAssistant()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Println("Assistant created!")
-	return nil
+	fmt.Println("Assistant created")
+	return assistant, nil
 }
 
-func (s *AssistantServiceImpl) checkAssistentFiles(assistantId string, assistantFileIds []string) []string {
+func (s *openaiAssistantBuilderImpl) checkAssistentFiles(assistantId string, assistantFileIds []string) ([]string, bool) {
 	openAIFiles := make([]openai.File, 0)
 	for _, fileId := range assistantFileIds {
 		openAIFile, err := s.client.GetFile(context.Background(), fileId)
@@ -90,11 +121,10 @@ func (s *AssistantServiceImpl) checkAssistentFiles(assistantId string, assistant
 		}
 		openAIFiles = append(openAIFiles, openAIFile)
 	}
-	recipeFileIds := s.prepareAssistentFiles(openAIFiles)
-	return recipeFileIds
+	return s.prepareAssistentFiles(openAIFiles)
 }
 
-func (s *AssistantServiceImpl) prepareNewAssistant() (openai.Assistant, error) {
+func (s *openaiAssistantBuilderImpl) prepareNewAssistant() (*openai.Assistant, error) {
 	tools := []openai.AssistantTool{
 		{
 			Type: openai.AssistantToolTypeCodeInterpreter,
@@ -108,32 +138,34 @@ func (s *AssistantServiceImpl) prepareNewAssistant() (openai.Assistant, error) {
 	filesFromOpenAI, err := s.client.ListFiles(context.Background())
 	if err != nil {
 		fmt.Println("Error while listing files!")
-		return openai.Assistant{}, err
+		return nil, err
 	}
+
+	assistentFiles, _ := s.prepareAssistentFiles(filesFromOpenAI.Files)
 
 	assistant, err := s.client.CreateAssistant(context.Background(),
 		openai.AssistantRequest{
 			Name:         s.assistantConfig.GetAssistantName(),
-			Model:        CHATGPT_MODEL,
+			Model:        *s.assistantConfig.GetAssistantGptModel(),
 			Description:  s.assistantConfig.GetAssistantDescription(),
 			Instructions: s.assistantConfig.GetAssistantInstructions(),
 			Tools:        tools,
-			FileIDs:      s.prepareAssistentFiles(filesFromOpenAI.Files),
+			FileIDs:      assistentFiles,
 		})
-	return assistant, err
+	return &assistant, err
 }
 
-func (s *AssistantServiceImpl) prepareAssistentFiles(filesFromOpenAI []openai.File) []string {
-	recipeFileIds := s.synchroniseRecipes(filesFromOpenAI)
-	return recipeFileIds
+func (s *openaiAssistantBuilderImpl) prepareAssistentFiles(filesFromOpenAI []openai.File) ([]string, bool) {
+	recipeFileIds, updated := s.synchroniseRecipes(filesFromOpenAI)
+	return recipeFileIds, updated
 }
 
-func (s *AssistantServiceImpl) synchroniseRecipes(filesFromOpenAI []openai.File) []string {
+func (s *openaiAssistantBuilderImpl) synchroniseRecipes(filesFromOpenAI []openai.File) ([]string, bool) {
 	// NOTE: ideally we would use hash of a file to check if it needs to be replaced, but openai does allow assisstant files to be downloaded
 	filesToUploadMap := make(map[string]int)       // [filename][byte size]
 	fileIdsToDeleteFromOpenAI := make([]string, 0) // fileIds
 	assistantFileIds := make([]string, 0)          // fileIds
-
+	updateNeeded := false
 	s.readAllLocalRecipes(s.localRecipesPath, filesToUploadMap)
 
 	// check if remote file exists in local files map and if hashes are different to decide if file should be replaced
@@ -156,17 +188,19 @@ func (s *AssistantServiceImpl) synchroniseRecipes(filesFromOpenAI []openai.File)
 
 	// delete files from openai if needed
 	if len(fileIdsToDeleteFromOpenAI) > 0 {
+		updateNeeded = true
 		s.deleteOpenAIFiles(fileIdsToDeleteFromOpenAI)
 	}
 
 	// upload local files to openai
 	if len(filesToUploadMap) > 0 {
+		updateNeeded = true
 		assistantFileIds = append(assistantFileIds, s.uploadFilesToOpenAI(s.localRecipesPath, filesToUploadMap)...)
 	}
-	return assistantFileIds
+	return assistantFileIds, updateNeeded
 }
 
-func (s *AssistantServiceImpl) uploadFilesToOpenAI(localRecipesPath string, filesToUploadMap map[string]int) []string {
+func (s *openaiAssistantBuilderImpl) uploadFilesToOpenAI(localRecipesPath string, filesToUploadMap map[string]int) []string {
 	fmt.Println("Uploading files to openai...")
 	uploadedFileIds := make([]string, 0)
 
@@ -190,7 +224,7 @@ func (s *AssistantServiceImpl) uploadFilesToOpenAI(localRecipesPath string, file
 	return uploadedFileIds
 }
 
-func (s *AssistantServiceImpl) deleteOpenAIFiles(fileIdsToDeleteFromOpenAI []string) {
+func (s *openaiAssistantBuilderImpl) deleteOpenAIFiles(fileIdsToDeleteFromOpenAI []string) {
 	fmt.Println("Deleting files from openai...")
 	for _, fileId := range fileIdsToDeleteFromOpenAI {
 		err := s.client.DeleteFile(context.Background(), fileId)
@@ -202,7 +236,7 @@ func (s *AssistantServiceImpl) deleteOpenAIFiles(fileIdsToDeleteFromOpenAI []str
 	fmt.Println("Files deleted!")
 }
 
-func (s *AssistantServiceImpl) getOpenAIFileByteSize(openAIFile openai.File) int {
+func (s *openaiAssistantBuilderImpl) getOpenAIFileByteSize(openAIFile openai.File) int {
 	file, err := s.client.GetFile(context.Background(), openAIFile.ID)
 	if err != nil {
 		fmt.Println("Error while getting file content!")
@@ -211,7 +245,7 @@ func (s *AssistantServiceImpl) getOpenAIFileByteSize(openAIFile openai.File) int
 	return file.Bytes
 }
 
-func (*AssistantServiceImpl) readAllLocalRecipes(localRecipesPath string, filesToUploadMap map[string]int) {
+func (*openaiAssistantBuilderImpl) readAllLocalRecipes(localRecipesPath string, filesToUploadMap map[string]int) {
 	files, err := os.ReadDir(localRecipesPath)
 	if err != nil {
 		fmt.Println("Error while reading recipes folder!")

@@ -40,7 +40,7 @@ func prepareAssistant() {
 			err.LogAndExit(recover())
 		}()
 		b := backoff.NewExponentialBackOff()
-		b.MaxElapsedTime = 10 * time.Second
+		b.MaxElapsedTime = 5 * time.Minute
 
 		err := backoff.Retry(func() error {
 			err := assistantService.PrepareAssistant()
@@ -53,5 +53,6 @@ func prepareAssistant() {
 			fmt.Println("All retries exhausted while preparing the assistant!")
 			panic(err)
 		}
+		fmt.Println("Assistant ready")
 	}(assistantService)
 }

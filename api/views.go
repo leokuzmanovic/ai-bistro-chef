@@ -1,17 +1,29 @@
 package api
 
-/*
-type CreateBookRequest struct {
-	Title  string `json:"title" validate:"required,lte=255"`
-	Author string `json:"author" validate:"required,lte=128"`
-}
-
-type BookResponse struct {
+type ConversationResponse struct {
 	Id        string `json:"id"`
 	CreatedAt string `json:"createdAt"`
-	Title     string `json:"title" validate:"required,lte=255"`
-	Author    string `json:"author" validate:"required,lte=128"`
 }
+
+type CreateConversationMessageRequest struct {
+	Message string `json:"message" validate:"required"`
+}
+
+type ConversationMessageResponse struct {
+	Message   string `json:"message"`
+	MessageId string `json:"messageId"`
+}
+
+type ConversationMessageShortResponse struct {
+	Message string `json:"message"`
+}
+
+type PrepareAssistantRequest struct {
+	ForceUpdate bool `json:"forceUpdate"`
+}
+
+/*
+
 
 type AuthLoginRequest struct {
 	Username string `json:"username" validate:"required"`

@@ -1,20 +1,18 @@
 package api
 
 const (
-	RESOURCE_CONVERSATION   = "conversation"
-	RESOURCE_TEXT_MESSAGE   = "text-message"
-	RESOURCE_VISUAL_MESSAGE = "visual-message"
+	RESOURCE_CONVERSATIONS = "conversations"
+	RESOURCE_MESSAGE       = "message"
 
-	ENDPOINT_CONVERSATION         = "/" + RESOURCE_CONVERSATION
-	ENDPOINT_CONVERSATION_MESSAGE = "/" + RESOURCE_CONVERSATION + "/:conversationId/" + RESOURCE_TEXT_MESSAGE
-	ENDPOINT_CONVERSATION_VISUAL  = "/" + RESOURCE_CONVERSATION + "/:conversationId/" + RESOURCE_VISUAL_MESSAGE
+	ENDPOINT_CONVERSATIONS                     = "/" + RESOURCE_CONVERSATIONS
+	ENDPOINT_CONVERSATIONS_MESSAGE             = "/" + RESOURCE_CONVERSATIONS + "/:conversationId/" + RESOURCE_MESSAGE
+	ENDPOINT_CONVERSATIONS_RESPONSE_BY_MESSAGE = "/" + RESOURCE_CONVERSATIONS + "/:conversationId/message/:messageId"
 )
 
 /*
-POST /conversation
-POST /conversation/:conversationId/text-message
-POST /conversation/:conversationId/visual-message
-
+POST /conversations
+POST /conversations/:conversationId/message-text
+POST /conversations/:conversationId/message-text-visual
 
 - creates an assistant (chef) if not existing already
 - trains it with predefined recipes which represent the favourite foods chef can make (knowledge base)

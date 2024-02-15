@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 
 	"github.com/labstack/echo/v4"
 	"github.com/sashabaranov/go-openai"
@@ -24,9 +25,64 @@ func LogAndExit(e any) {
 }
 
 func IsOpenAINotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
 	var apiErr *openai.APIError
 	if ok := errors.As(err, &apiErr); ok {
 		return apiErr.HTTPStatusCode == http.StatusNotFound
+	}
+	return false
+}
+
+func IsOpenAICannotAddMessageToRunningThreadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.APIError
+	if ok := errors.As(err, &apiErr); ok {
+		if apiErr.HTTPStatusCode != http.StatusBadRequest {
+			return false
+		}
+		match, _ := regexp.MatchString("(Can't add messages to thread).*(while a run).*(is active)", apiErr.Message)
+		return match
+	}
+	return false
+}
+
+func IsOpenAIRateLimitExcededError(runLastError *openai.RunLastError) bool {
+	if runLastError == nil {
+		return false
+	}
+	return runLastError.Code == "rate_limit_exceeded"
+}
+
+func IsOpenAICannotCancelFinishedRunError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.APIError
+	if ok := errors.As(err, &apiErr); ok {
+		if apiErr.HTTPStatusCode != http.StatusBadRequest {
+			return false
+		}
+		match, _ := regexp.MatchString("Cannot cancel run with status", apiErr.Message)
+		return match
+	}
+	return false
+}
+
+func IsOpenAIThreadHasActiveRunError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apiErr *openai.APIError
+	if ok := errors.As(err, &apiErr); ok {
+		if apiErr.HTTPStatusCode != http.StatusBadRequest {
+			return false
+		}
+		match, _ := regexp.MatchString("(Thread).*(already has an active run)", apiErr.Message)
+		return match
 	}
 	return false
 }
@@ -113,3 +169,38 @@ func (s NotFoundError) Error() string {
 func (s NotFoundError) GetErrorData() ErrorData {
 	return ErrorData{Type: "NotFoundError", Code: http.StatusNotFound, Message: "Not found"}
 }
+
+type ThreadNotFoundError struct {
+}
+
+func (s ThreadNotFoundError) Error() string {
+	return "ThreadNotFoundError"
+}
+
+func (s ThreadNotFoundError) GetErrorData() ErrorData {
+	return ErrorData{Type: "ThreadNotFoundError", Code: http.StatusNotFound, Message: "Thread not found"}
+}
+
+type AssistantNotReadyError struct {
+}
+
+func (s AssistantNotReadyError) Error() string {
+	return "AssistantNotReadyError"
+}
+
+func (s AssistantNotReadyError) GetErrorData() ErrorData {
+	return ErrorData{Type: "AssistantNotReadyError", Code: http.StatusInternalServerError, Message: "Assistant is not yet ready to process requests"}
+}
+
+/*
+type ConversationProcessorBusyError struct {
+}
+
+func (s ConversationProcessorBusyError) Error() string {
+	return "ConversationProcessorBusyError"
+}
+
+func (s ConversationProcessorBusyError) GetErrorData() ErrorData {
+	return ErrorData{Type: "ConversationProcessorBusyError", Code: http.StatusInternalServerError, Message: "Conversation processor is busy processing previous request"}
+}
+*/

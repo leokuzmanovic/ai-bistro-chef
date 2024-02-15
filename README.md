@@ -4,6 +4,8 @@
 - retry when trying to create an assistant
 - handle fatal errors in main.go
 - explain how idealy assistant would be created somewhere else and we would just use it here 
+- prevent stoping thread runs that does not belong to the user (auth)
+- periodically clear local cache that holds thread run results or use central caching system with TTL like Redis 
 
 ## to be added later:
 - tests
