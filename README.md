@@ -1,6 +1,6 @@
 # AI Bistro Chef
 
-AI Bistro Chef is a project designed to create a virtual assistant chef that can suggest meals based on a set of ingredients provided by the user, either through text or images (of ingredients). This assistant, or "chef," is trained on predefined recipes representing its knowledge base of favorite foods it can prepare. Beyond leveraging its internal knowledge, the chef can also browse the internet to find new meal suggestions, ensuring users always have something exciting to try.
+AI Bistro Chef is an OpenAI Assistent and Vision API demo project designed to create a virtual assistant chef that can suggest meals based on a set of ingredients provided by the user, either through text or images (of ingredients). This assistant, or "chef," is trained on predefined recipes representing its knowledge base of favorite foods it can prepare. Beyond leveraging its internal knowledge, the chef can also browse the internet to find new meal suggestions, ensuring users always have something exciting to try.
 
 ## Functional Requirements
 
