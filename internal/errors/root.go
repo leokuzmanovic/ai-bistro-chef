@@ -191,16 +191,3 @@ func (s AssistantNotReadyError) Error() string {
 func (s AssistantNotReadyError) GetErrorData() ErrorData {
 	return ErrorData{Type: "AssistantNotReadyError", Code: http.StatusInternalServerError, Message: "Assistant is not yet ready to process requests"}
 }
-
-/*
-type ConversationProcessorBusyError struct {
-}
-
-func (s ConversationProcessorBusyError) Error() string {
-	return "ConversationProcessorBusyError"
-}
-
-func (s ConversationProcessorBusyError) GetErrorData() ErrorData {
-	return ErrorData{Type: "ConversationProcessorBusyError", Code: http.StatusInternalServerError, Message: "Conversation processor is busy processing previous request"}
-}
-*/

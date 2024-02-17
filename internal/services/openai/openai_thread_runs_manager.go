@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,6 +12,12 @@ import (
 	"github.com/cenkalti/backoff"
 	errs "github.com/leokuzmanovic/ai-bistro-chef/internal/errors"
 	openai "github.com/sashabaranov/go-openai"
+)
+
+const (
+	chatCompletionGetIngredientsPrompt = `"Enlist the names of ingredients, with their quantities if possible. 
+			If you cannot identify the quantities, do not mention them, just enlist the names of ingredients. 
+			Do not provide any other description. I just need the list of ingredients."`
 )
 
 type openaiThreadRunManager interface {
@@ -46,6 +53,7 @@ func (s *openaiThreadRunManagerImpl) startThreadRun(ctx context.Context, threadI
 			s.startRunResultPolling(context.Background(), threadId, messageId, &run)
 			return nil
 		}
+
 		if errs.IsOpenAINotFoundError(opErr) {
 			opErr = errs.ThreadNotFoundError{}
 			return nil
@@ -61,6 +69,7 @@ func (s *openaiThreadRunManagerImpl) startThreadRun(ctx context.Context, threadI
 		} else if opErr != nil {
 			return opErr
 		}
+
 		return opErr
 	}, b)
 
@@ -75,16 +84,15 @@ func (s *openaiThreadRunManagerImpl) startThreadRun(ctx context.Context, threadI
 func (s *openaiThreadRunManagerImpl) startRunResultPolling(ctx context.Context, threadId, messageId string, run *openai.Run) {
 	go func(ctx context.Context, threadId, messageId string, run *openai.Run) {
 		rc := make(chan bool, 1)
-		var expired atomic.Bool = atomic.Bool{}
-		expired.Store(false)
+		var shouldStop atomic.Bool = atomic.Bool{}
+		shouldStop.Store(false)
 
-		// start the polling, but monitor for cancleation signals
 		go func() {
 			for {
-				if expired.Load() {
+				if shouldStop.Load() {
 					break
 				}
-				s.tryGetRunResult(ctx, threadId, messageId, run, &expired)
+				s.doRunResultPolling(ctx, threadId, messageId, run, &shouldStop)
 			}
 			rc <- true
 		}()
@@ -92,11 +100,11 @@ func (s *openaiThreadRunManagerImpl) startRunResultPolling(ctx context.Context, 
 		select {
 		case <-ctx.Done():
 			s.updateThreadRunResult(ctx, threadId, messageId, "", errors.New("context cancelled"))
-			expired.Store(true)
+			shouldStop.Store(true)
 			fmt.Println("Context cancelled")
 		case <-time.After(s.runMonitorTimeout):
 			s.updateThreadRunResult(ctx, threadId, messageId, "", errors.New("run monitor timeout"))
-			expired.Store(true)
+			shouldStop.Store(true)
 			fmt.Println("Run monitor timeout")
 		case <-rc:
 			fmt.Println("Run result stored")
@@ -104,20 +112,20 @@ func (s *openaiThreadRunManagerImpl) startRunResultPolling(ctx context.Context, 
 	}(ctx, threadId, messageId, run)
 }
 
-func (s *openaiThreadRunManagerImpl) tryGetRunResult(ctx context.Context, threadId, messageId string, run *openai.Run, stopSignal *atomic.Bool) {
+func (s *openaiThreadRunManagerImpl) doRunResultPolling(ctx context.Context, threadId, messageId string, run *openai.Run, shouldStop *atomic.Bool) {
 	var err error
 	b := backoff.NewExponentialBackOff()
-	b.MaxElapsedTime = 1 * time.Minute
+	b.MaxElapsedTime = 2 * time.Minute
 
 	_ = backoff.Retry(func() error {
-		if stopSignal.Load() {
+		if shouldStop.Load() {
 			fmt.Println("Stop signal received")
 			return nil
 		}
-		run, err = s.tryRetrieveFinishedRun(ctx, run.ID, threadId)
+		run, err = s.tryRetrieveStoppedRun(ctx, run.ID, threadId)
 		if err != nil && errors.Is(err, errs.ThreadNotFoundError{}) {
 			s.updateThreadRunResult(ctx, threadId, messageId, "", err)
-			stopSignal.Store(true)
+			shouldStop.Store(true)
 			fmt.Println("Thread not found")
 			return nil
 		}
@@ -126,50 +134,143 @@ func (s *openaiThreadRunManagerImpl) tryGetRunResult(ctx context.Context, thread
 			return errors.New("run is not ready")
 		}
 
-		// from this point on, run is completed
+		// check if any assistant functions should be processed
+		for run.Status == openai.RunStatusRequiresAction && run.RequiredAction.Type == openai.RequiredActionTypeSubmitToolOutputs {
+			err = s.processRunFunctions(ctx, run)
+			if err != nil {
+				fmt.Println("Error while processing run functions: ", err.Error())
+				return err
+			}
+		}
+
+		// from this point on run should be completed
 		if run.Status == openai.RunStatusCompleted {
-			limit := 10
-			order := "desc"
-			messages, err := s.client.ListMessage(ctx, threadId, &limit, &order, &messageId, nil)
-			if errs.IsOpenAINotFoundError(err) {
-				s.updateThreadRunResult(ctx, threadId, messageId, "", err)
-				stopSignal.Store(true)
-				fmt.Println("Thread not found")
-				return nil
-			} else if err != nil {
-				fmt.Println("Error while retrieving messages: ", err.Error())
+			return s.storeAssistantMessagesAsRunResult(ctx, threadId, messageId, shouldStop)
+		}
+		fmt.Println("Run cannot be completed")
+		return nil
+	}, b)
+}
+
+func (s *openaiThreadRunManagerImpl) storeAssistantMessagesAsRunResult(ctx context.Context, threadId string, messageId string, shouldStop *atomic.Bool) error {
+	limit := 10
+	order := "desc"
+	messages, err := s.client.ListMessage(ctx, threadId, &limit, &order, nil, nil)
+	if errs.IsOpenAINotFoundError(err) {
+		s.updateThreadRunResult(ctx, threadId, messageId, "", err)
+		shouldStop.Store(true)
+		fmt.Println("Thread not found")
+		return nil
+	} else if err != nil {
+		fmt.Println("Error while retrieving messages: ", err.Error())
+		return err
+	}
+
+	resultMessage := ""
+	if len(messages.Messages) <= 0 {
+		fmt.Println("No response from the assistant")
+		resultMessage = "No response from the assistant"
+	} else {
+		for _, message := range messages.Messages {
+			if message.ID == messageId {
+				break
+			}
+			if message.Role == openai.ChatMessageRoleAssistant {
+				resultMessage = message.Content[0].Text.Value + "\n\n" + resultMessage
+			} else {
+				break
+			}
+		}
+		if len(resultMessage) > 0 {
+			resultMessage = resultMessage[:len(resultMessage)-2]
+		}
+		fmt.Println("Assistant response parsed")
+	}
+
+	fmt.Println("Run is completed: ", resultMessage)
+	s.updateThreadRunResult(ctx, threadId, messageId, resultMessage, nil)
+	shouldStop.Store(true)
+	return nil
+}
+
+type ArgumentsData struct {
+	Image       string `json:"image"`
+	UserMessage string `json:"user_message"`
+}
+
+func (s *openaiThreadRunManagerImpl) processRunFunctions(ctx context.Context, run *openai.Run) error {
+	toolCalls := run.RequiredAction.SubmitToolOutputs.ToolCalls
+	toolOutputs := make([]openai.ToolOutput, 0, len(toolCalls))
+
+	for _, toolCall := range toolCalls {
+		name := toolCall.Function.Name
+		arguments := toolCall.Function.Arguments
+
+		argumentsData := ArgumentsData{}
+		err := json.Unmarshal([]byte(arguments), &argumentsData)
+		if err != nil {
+			fmt.Println("Error while unmarshalling arguments: ", err.Error())
+			return nil
+		}
+
+		if name == assistant_Function_Describe_Image {
+			visionResponse, err := s.client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+				Model: openai.GPT4VisionPreview,
+				Messages: []openai.ChatCompletionMessage{
+					{
+						Role: openai.ChatMessageRoleUser,
+						MultiContent: []openai.ChatMessagePart{
+							{
+								Type: openai.ChatMessagePartTypeText,
+								Text: chatCompletionGetIngredientsPrompt,
+							},
+							{
+								Type: openai.ChatMessagePartTypeImageURL,
+								ImageURL: &openai.ChatMessageImageURL{
+									URL:    argumentsData.Image,
+									Detail: openai.ImageURLDetailLow,
+								},
+							},
+						},
+					},
+				},
+				MaxTokens: 2048,
+			})
+			if err != nil {
+				fmt.Println("Error while creating vision response: ", err.Error())
 				return err
 			}
 
-			resultMessage := ""
-			if len(messages.Messages) <= 0 {
-				fmt.Println("No response from the assistant")
-				resultMessage = "No response from the assistant"
-			} else {
-				for _, message := range messages.Messages {
-					if message.ID == messageId {
-						break
-					}
-					if message.Role == openai.ChatMessageRoleAssistant {
-						// because we are iterating in reverse order, we need to prepend the new message
-						resultMessage = message.Content[0].Text.Value + "\n\n" + resultMessage
-					} else {
-						break
-					}
-				}
-				if len(resultMessage) > 0 {
-					resultMessage = resultMessage[:len(resultMessage)-2]
-				}
-				fmt.Println("Assistant response parsed")
-			}
-
-			s.updateThreadRunResult(ctx, threadId, messageId, resultMessage, nil)
-			stopSignal.Store(true)
-			return nil
+			toolOutputs = append(toolOutputs, openai.ToolOutput{
+				ToolCallID: toolCall.ID,
+				Output:     visionResponse.Choices[0].Message.Content,
+			})
+			fmt.Println("Vision response created: ", visionResponse.Choices[0].Message.Content)
+		} else {
+			fmt.Println("Unknown function: ", name)
 		}
-		fmt.Println("Run is not completed")
-		return nil
-	}, b)
+	}
+
+	runWithToolOptionsSubmited, err := s.client.SubmitToolOutputs(context.Background(), run.ThreadID, run.ID, openai.SubmitToolOutputsRequest{
+		ToolOutputs: toolOutputs,
+	})
+	if err != nil {
+		fmt.Println("Error while submitting tool outputs: ", err.Error())
+		return err
+	}
+	run = &runWithToolOptionsSubmited
+
+	finishedRun, err := s.tryRetrieveStoppedRun(ctx, run.ID, run.ThreadID)
+	if err != nil {
+		fmt.Println("error waiting on a run to stop")
+		return err
+	}
+	if finishedRun == nil {
+		fmt.Println("run is not ready")
+		return errors.New("run is not ready")
+	}
+	run = finishedRun
+	return nil
 }
 
 func (s *openaiThreadRunManagerImpl) updateThreadRunResult(ctx context.Context, threadId, messageId, result string, err error) {
@@ -185,7 +286,7 @@ func getErrorResult(err error) string {
 	return fmt.Sprintf("Error: %s", err)
 }
 
-func (s *openaiThreadRunManagerImpl) tryRetrieveFinishedRun(ctx context.Context, runId string, threadId string) (*openai.Run, error) {
+func (s *openaiThreadRunManagerImpl) tryRetrieveStoppedRun(ctx context.Context, runId string, threadId string) (*openai.Run, error) {
 	var err error
 	var run openai.Run
 
@@ -199,7 +300,7 @@ func (s *openaiThreadRunManagerImpl) tryRetrieveFinishedRun(ctx context.Context,
 	}
 	if run.Status == openai.RunStatusQueued || run.Status == openai.RunStatusInProgress || errs.IsOpenAIRateLimitExcededError(run.LastError) {
 		fmt.Println("Continuing to poll for run results")
-		return &run, fmt.Errorf("continue polling")
+		return &run, fmt.Errorf("run in progress")
 	}
 	return &run, err
 }

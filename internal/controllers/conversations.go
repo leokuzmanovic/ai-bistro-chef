@@ -35,7 +35,6 @@ func wireConversations(e *echo.Echo) {
 // @Success 201
 // @Failure 400 {object} errors.AppError "BadRequestError"
 */
-
 func (s *ConversationsController) newConversation(ctx echo.Context) error {
 	conversationId, err := s.assistantService.StartNewConversation(ctx.Request().Context())
 	if err != nil {
@@ -65,7 +64,7 @@ func (s *ConversationsController) newConversationTextMessage(ctx echo.Context, b
 		return &errs.BadRequestError{}
 	}
 
-	messageResponse, messageResponseId, err := s.assistantService.AskAssistant(ctx.Request().Context(), conversationId, body.Message)
+	messageResponse, messageResponseId, err := s.assistantService.AskAssistant(ctx.Request().Context(), conversationId, body)
 	if err != nil {
 		return errors.Wrap(err, "conversation")
 	}

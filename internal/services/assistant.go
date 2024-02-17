@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/leokuzmanovic/ai-bistro-chef/api"
 )
 
 type AssistantService interface {
 	PrepareAssistant() error
 	StartNewConversation(context.Context) (string, error)
-	AskAssistant(context.Context, string, string) (string, string, error)
+	AskAssistant(context.Context, string, *api.CreateConversationMessageRequest) (string, string, error)
 	GetMessageResponseFromAssistant(context.Context, string, string, time.Duration) string
 }
 
@@ -43,7 +45,11 @@ func (s *AssistantServiceImpl) StartNewConversation(ctx context.Context) (string
 	return s.aiAssistant.CreateNewThread(ctx)
 }
 
-func (s *AssistantServiceImpl) AskAssistant(ctx context.Context, conversationId, message string) (string, string, error) {
+func (s *AssistantServiceImpl) AskAssistant(ctx context.Context, conversationId string, messageRequest *api.CreateConversationMessageRequest) (string, string, error) {
+	message := messageRequest.Message
+	if messageRequest.ImageUrl != "" {
+		message += " " + messageRequest.ImageUrl
+	}
 	messageId, err := s.aiAssistant.AddMessageToThread(ctx, conversationId, message)
 	if err != nil {
 		return "", "", err

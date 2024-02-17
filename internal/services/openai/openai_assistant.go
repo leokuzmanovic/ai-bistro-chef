@@ -70,10 +70,10 @@ func (s *openaiAssistantImpl) AddMessageToThread(ctx context.Context, threadId, 
 	b := backoff.NewExponentialBackOff()
 	b.MaxElapsedTime = 10 * time.Second
 	var msg openai.Message
-	var err error
 	var opErr error
 
 	_ = backoff.Retry(func() error {
+		var err error
 		msg, err = s.client.CreateMessage(ctx, threadId, openai.MessageRequest{
 			Role:    string(openai.ThreadMessageRoleUser),
 			Content: message,
@@ -102,6 +102,7 @@ func (s *openaiAssistantImpl) AddMessageToThread(ctx context.Context, threadId, 
 	}
 
 	fmt.Println("Message added to thread")
+
 	return msg.ID, nil
 }
 

@@ -8,6 +8,13 @@ import (
 	"github.com/leokuzmanovic/ai-bistro-chef/internal/configuration"
 	errs "github.com/leokuzmanovic/ai-bistro-chef/internal/errors"
 	openai "github.com/sashabaranov/go-openai"
+	"github.com/sashabaranov/go-openai/jsonschema"
+)
+
+const (
+	assistant_Function_Describe_Image             = "describe_image"
+	assistant_Function_Describe_Image_Description = `"Describe an image user uploaded, understand the individual items (ingredients) in the image, 
+	and use it as an input for constructing an appropriate prompt that will be later used to generate a cooking recipe."`
 )
 
 type openaiAssistantBuilder interface {
@@ -125,12 +132,35 @@ func (s *openaiAssistantBuilderImpl) checkAssistentFiles(assistantId string, ass
 }
 
 func (s *openaiAssistantBuilderImpl) prepareNewAssistant() (*openai.Assistant, error) {
+	params := jsonschema.Definition{
+		Type: jsonschema.Object,
+		Properties: map[string]jsonschema.Definition{
+			"user_message": {
+				Type:        jsonschema.String,
+				Description: "Message the user sent along with the image, without the URL itself",
+			},
+			"image": {
+				Type:        jsonschema.String,
+				Description: "URL of the image user provided",
+			},
+		},
+		Required: []string{"user_message", "image"},
+	}
+
 	tools := []openai.AssistantTool{
 		{
 			Type: openai.AssistantToolTypeCodeInterpreter,
 		},
 		{
 			Type: openai.AssistantToolTypeRetrieval,
+		},
+		{
+			Type: openai.AssistantToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        assistant_Function_Describe_Image,
+				Description: assistant_Function_Describe_Image_Description,
+				Parameters:  params,
+			},
 		},
 	}
 
@@ -161,7 +191,7 @@ func (s *openaiAssistantBuilderImpl) prepareAssistentFiles(filesFromOpenAI []ope
 }
 
 func (s *openaiAssistantBuilderImpl) synchroniseRecipes(filesFromOpenAI []openai.File) ([]string, bool) {
-	// NOTE: ideally we would use hash of a file to check if it needs to be replaced, but openai does allow assisstant files to be downloaded
+	// NOTE: ideally we would use the file hash to check if it needs to be replaced, but openai does allow assisstant files to be downloaded
 	filesToUploadMap := make(map[string]int)       // [filename][byte size]
 	fileIdsToDeleteFromOpenAI := make([]string, 0) // fileIds
 	assistantFileIds := make([]string, 0)          // fileIds

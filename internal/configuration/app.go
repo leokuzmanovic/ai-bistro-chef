@@ -14,8 +14,7 @@ func (s *AppConfig) GetOpenAiAssistantConfig() *OpenAiAssistantConfig {
 }
 
 func (s *OpenAiAssistantConfig) GetAssistantId() *string {
-	name := ""
-	return &name
+	return nil
 }
 
 func (s *OpenAiAssistantConfig) GetAssistantName() *string {
@@ -43,8 +42,7 @@ func (s *OpenAiAssistantConfig) GetAssistantGptModel() *string {
 }
 
 func (s *OpenAiAssistantConfig) GetOpenAiToken() *string {
-	token := ""
-	return &token
+	return nil
 }
 
 func (s *OpenAiAssistantConfig) GetThreadRunTimeout() time.Duration {

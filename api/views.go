@@ -6,7 +6,8 @@ type ConversationResponse struct {
 }
 
 type CreateConversationMessageRequest struct {
-	Message string `json:"message" validate:"required"`
+	Message  string `json:"message" validate:"required"`
+	ImageUrl string `json:"imageUrl"`
 }
 
 type ConversationMessageResponse struct {
@@ -21,21 +22,3 @@ type ConversationMessageShortResponse struct {
 type PrepareAssistantRequest struct {
 	ForceUpdate bool `json:"forceUpdate"`
 }
-
-/*
-
-
-type AuthLoginRequest struct {
-	Username string `json:"username" validate:"required"`
-	Password string `json:"password" validate:"required"`
-}
-
-type AuthResponse struct {
-	AccessToken  string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-}
-
-type RefreshTokenRequest struct {
-	RefreshToken string `json:"refreshToken"`
-}
-*/
